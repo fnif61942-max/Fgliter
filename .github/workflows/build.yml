@@ -9,9 +9,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Unzip project
-        run: unzip -o "$(ls -t *.zip | head -1)" -d proj
+      - name: Unzip newest project zip
+        run: |
+          latest=""
+          latest_t=0
+          for f in *.zip; do
+            t=$(git log -1 --format=%ct -- "$f")
+            if [ "$t" -gt "$latest_t" ]; then latest_t=$t; latest="$f"; fi
+          done
+          echo "Using: $latest" | tee -a "$GITHUB_STEP_SUMMARY"
+          unzip -o "$latest" -d proj
 
       - uses: actions/setup-java@v4
         with:
@@ -23,8 +33,17 @@ jobs:
           gradle-version: 8.5
 
       - name: Build
-        run: gradle build
         working-directory: proj
+        run: |
+          set +e
+          gradle build --console=plain > build.log 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            grep -B1 -A3 'error:' build.log | head -150 > errs.txt
+            if [ ! -s errs.txt ]; then tail -n 60 build.log > errs.txt; fi
+            { echo '### Build errors'; echo '```'; cat errs.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit $code
 
       - uses: actions/upload-artifact@v4
         with:
